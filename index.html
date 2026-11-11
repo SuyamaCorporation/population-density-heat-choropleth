@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>人口密度ヒートコロプレスマップ（都道府県）</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex flex-col items-center py-6 px-4">
+<h1 class="text-2xl font-bold mb-2 text-red-300">人口密度ヒートコロプレスマップ（都道府県）</h1>
+<p class="text-sm text-gray-400 mb-5">クリックで詳細表示 ／ 色は人口密度（人/km²）を表します</p>
+
+<div class="flex flex-col xl:flex-row gap-6 w-full max-w-6xl">
+  <!-- Map grid -->
+  <div class="flex-1">
+    <div id="mapGrid" class="grid gap-1" style="grid-template-columns: repeat(11, 1fr); max-width: 600px;" role="grid" aria-label="都道府県人口密度マップ"></div>
+    <!-- Legend -->
+    <div class="mt-4 flex items-center gap-3">
+      <span class="text-xs text-gray-400">低密度</span>
+      <div class="flex gap-0.5">
+        <div class="w-8 h-5 rounded" style="background:#fff5f5"></div>
+        <div class="w-8 h-5 rounded" style="background:#fca5a5"></div>
+        <div class="w-8 h-5 rounded" style="background:#f87171"></div>
+        <div class="w-8 h-5 rounded" style="background:#dc2626"></div>
+        <div class="w-8 h-5 rounded" style="background:#7f1d1d"></div>
+      </div>
+      <span class="text-xs text-gray-400">高密度</span>
+    </div>
+    <div class="flex gap-1 mt-1 ml-14">
+      <span class="text-xs text-gray-500 w-8 text-center">&lt;100</span>
+      <span class="text-xs text-gray-500 w-8 text-center">100-</span>
+      <span class="text-xs text-gray-500 w-8 text-center">300-</span>
+      <span class="text-xs text-gray-500 w-8 text-center">600-</span>
+      <span class="text-xs text-gray-500 w-8 text-center">1000+</span>
+    </div>
+  </div>
+
+  <!-- Right panel: popup + ranking -->
+  <div class="flex flex-col gap-4 xl:w-72 w-full">
+    <!-- Popup -->
+    <div id="popup" class="bg-gray-800 rounded-xl p-4 hidden" role="region" aria-live="polite" aria-label="都道府県詳細">
+      <h2 id="popupName" class="text-lg font-bold text-red-300 mb-2"></h2>
+      <table class="w-full text-sm">
+        <tr><td class="text-gray-400 py-0.5">人口</td><td id="popupPop" class="font-mono text-white text-right"></td></tr>
+        <tr><td class="text-gray-400 py-0.5">面積</td><td id="popupArea" class="font-mono text-white text-right"></td></tr>
+        <tr><td class="text-gray-400 py-0.5">人口密度</td><td id="popupDensity" class="font-mono text-red-300 font-bold text-right"></td></tr>
+        <tr><td class="text-gray-400 py-0.5">密度ランク</td><td id="popupRank" class="font-mono text-yellow-300 text-right"></td></tr>
+        <tr><td class="text-gray-400 py-0.5">地方</td><td id="popupRegion" class="text-white text-right"></td></tr>
+      </table>
+    </div>
+    <div id="popupHint" class="bg-gray-800 rounded-xl p-4 text-sm text-gray-400 text-center">
+      都道府県をクリックすると詳細が表示されます
+    </div>
+
+    <!-- Ranking -->
+    <div class="bg-gray-800 rounded-xl p-4">
+      <h3 class="text-sm font-bold text-gray-300 mb-2">人口密度 上位10都道府県</h3>
+      <ol id="rankingList" class="text-sm space-y-1"></ol>
+    </div>
+  </div>
+</div>
+
+<script>
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// 47都道府県データ: name, population(千人), area(km²), region
+const PREFS = [
+  {name:'北海道',pop:5140,area:83424,region:'北海道'},
+  {name:'青森',pop:1200,area:9646,region:'東北'},
+  {name:'岩手',pop:1183,area:15275,region:'東北'},
+  {name:'宮城',pop:2275,area:7282,region:'東北'},
+  {name:'秋田',pop:928,area:11638,region:'東北'},
+  {name:'山形',pop:1023,area:9323,region:'東北'},
+  {name:'福島',pop:1800,area:13784,region:'東北'},
+  {name:'茨城',pop:2840,area:6097,region:'関東'},
+  {name:'栃木',pop:1912,area:6408,region:'関東'},
+  {name:'群馬',pop:1904,area:6362,region:'関東'},
+  {name:'埼玉',pop:7340,area:3798,region:'関東'},
+  {name:'千葉',pop:6270,area:5157,region:'関東'},
+  {name:'東京',pop:14010,area:2194,region:'関東'},
+  {name:'神奈川',pop:9240,area:2416,region:'関東'},
+  {name:'新潟',pop:2155,area:12584,region:'中部'},
+  {name:'富山',pop:1020,area:4248,region:'中部'},
+  {name:'石川',pop:1118,area:4186,region:'中部'},
+  {name:'福井',pop:756,area:4190,region:'中部'},
+  {name:'山梨',pop:803,area:4465,region:'中部'},
+  {name:'長野',pop:2020,area:13562,region:'中部'},
+  {name:'岐阜',pop:1951,area:10621,region:'中部'},
+  {name:'静岡',pop:3581,area:7777,region:'中部'},
+  {name:'愛知',pop:7500,area:5173,region:'中部'},
+  {name:'三重',pop:1748,area:5774,region:'近畿'},
+  {name:'滋賀',pop:1416,area:4017,region:'近畿'},
+  {name:'京都',pop:2545,area:4612,region:'近畿'},
+  {name:'大阪',pop:8810,area:1905,region:'近畿'},
+  {name:'兵庫',pop:5401,area:8401,region:'近畿'},
+  {name:'奈良',pop:1312,area:3691,region:'近畿'},
+  {name:'和歌山',pop:884,area:4725,region:'近畿'},
+  {name:'鳥取',pop:541,area:3507,region:'中国'},
+  {name:'島根',pop:659,area:6708,region:'中国'},
+  {name:'岡山',pop:1879,area:7115,region:'中国'},
+  {name:'広島',pop:2778,area:8479,region:'中国'},
+  {name:'山口',pop:1313,area:6112,region:'中国'},
+  {name:'徳島',pop:697,area:4147,region:'四国'},
+  {name:'香川',pop:950,area:1877,region:'四国'},
+  {name:'愛媛',pop:1309,area:5676,region:'四国'},
+  {name:'高知',pop:678,area:7103,region:'四国'},
+  {name:'福岡',pop:5120,area:4986,region:'九州'},
+  {name:'佐賀',pop:800,area:2441,region:'九州'},
+  {name:'長崎',pop:1286,area:4132,region:'九州'},
+  {name:'熊本',pop:1721,area:7409,region:'九州'},
+  {name:'大分',pop:1118,area:6341,region:'九州'},
+  {name:'宮崎',pop:1066,area:7735,region:'九州'},
+  {name:'鹿児島',pop:1575,area:9187,region:'九州'},
+  {name:'沖縄',pop:1468,area:2282,region:'沖縄'},
+];
+
+// Calculate density
+PREFS.forEach(p => {
+  p.density = Math.round(p.pop * 1000 / p.area);
+});
+
+// Sort for ranking
+const ranked = [...PREFS].sort((a,b) => b.density - a.density);
+
+// Density color scale (5 levels)
+function densityColor(d) {
+  if (d >= 1000) return {bg:'#7f1d1d', text:'#fff'};
+  if (d >= 600)  return {bg:'#dc2626', text:'#fff'};
+  if (d >= 300)  return {bg:'#f87171', text:'#1f2937'};
+  if (d >= 100)  return {bg:'#fca5a5', text:'#1f2937'};
+  return {bg:'#fff5f5', text:'#1f2937'};
+}
+
+// Grid layout: row-col mapping (approximate geographic position, 11 columns)
+// Each entry: [row, col, prefIndex]
+// Using a simplified grid that roughly matches Japan's shape
+const GRID = [
+  // row 0
+  {r:0,c:10,i:0}, // 北海道
+  // row 1
+  {r:1,c:9,i:2},  // 岩手
+  {r:1,c:10,i:1}, // 青森
+  // row 2
+  {r:2,c:8,i:6},  // 福島
+  {r:2,c:9,i:3},  // 宮城
+  {r:2,c:10,i:4}, // 秋田
+  // row 3
+  {r:3,c:7,i:7},  // 茨城
+  {r:3,c:8,i:8},  // 栃木
+  {r:3,c:9,i:9},  // 群馬
+  {r:3,c:10,i:5}, // 山形
+  // row 4
+  {r:4,c:5,i:12}, // 東京
+  {r:4,c:6,i:11}, // 千葉
+  {r:4,c:7,i:10}, // 埼玉
+  {r:4,c:8,i:13}, // 神奈川
+  {r:4,c:9,i:14}, // 新潟
+  // row 5
+  {r:5,c:4,i:21}, // 静岡
+  {r:5,c:5,i:19}, // 長野
+  {r:5,c:6,i:18}, // 山梨
+  {r:5,c:7,i:20}, // 岐阜
+  {r:5,c:8,i:15}, // 富山
+  {r:5,c:9,i:16}, // 石川
+  {r:5,c:10,i:17},// 福井
+  // row 6
+  {r:6,c:3,i:26}, // 大阪
+  {r:6,c:4,i:22}, // 愛知
+  {r:6,c:5,i:23}, // 三重
+  {r:6,c:6,i:24}, // 滋賀
+  {r:6,c:7,i:25}, // 京都
+  {r:6,c:8,i:27}, // 兵庫
+  // row 7
+  {r:7,c:2,i:34}, // 山口
+  {r:7,c:3,i:33}, // 広島
+  {r:7,c:4,i:32}, // 岡山
+  {r:7,c:5,i:28}, // 奈良
+  {r:7,c:6,i:29}, // 和歌山
+  // row 8
+  {r:8,c:1,i:35}, // 徳島
+  {r:8,c:2,i:31}, // 島根
+  {r:8,c:3,i:30}, // 鳥取
+  {r:8,c:4,i:36}, // 香川
+  {r:8,c:5,i:37}, // 愛媛
+  {r:8,c:6,i:38}, // 高知
+  // row 9
+  {r:9,c:0,i:46}, // 沖縄
+  {r:9,c:1,i:39}, // 福岡
+  {r:9,c:2,i:40}, // 佐賀
+  {r:9,c:3,i:42}, // 熊本
+  {r:9,c:4,i:41}, // 長崎
+  // row 10
+  {r:10,c:1,i:43}, // 大分
+  {r:10,c:2,i:44}, // 宮崎
+  {r:10,c:3,i:45}, // 鹿児島
+];
+
+const ROWS = 11, COLS = 11;
+
+function buildMap() {
+  const container = document.getElementById('mapGrid');
+  container.style.gridTemplateColumns = `repeat(${COLS}, 1fr)`;
+
+  // Build 2D grid
+  const grid = Array.from({length:ROWS}, () => Array(COLS).fill(null));
+  GRID.forEach(({r,c,i}) => { grid[r][c] = i; });
+
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'rounded text-center cursor-pointer transition-transform hover:scale-110 hover:z-10 relative';
+      cell.style.aspectRatio = '1';
+      cell.style.minWidth = '40px';
+
+      const idx = grid[r][c];
+      if (idx !== null) {
+        const pref = PREFS[idx];
+        const col = densityColor(pref.density);
+        cell.style.backgroundColor = col.bg;
+        cell.style.color = col.text;
+        cell.style.fontSize = '10px';
+        cell.style.fontWeight = 'bold';
+        cell.style.display = 'flex';
+        cell.style.alignItems = 'center';
+        cell.style.justifyContent = 'center';
+        cell.style.padding = '2px';
+        cell.textContent = pref.name;
+        cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-label', `${pref.name}（人口密度 ${pref.density.toLocaleString()}人/km²）`);
+        cell.setAttribute('tabindex', '0');
+
+        const rank = ranked.findIndex(p => p.name === pref.name) + 1;
+        cell.addEventListener('click', () => showPopup(pref, rank));
+        cell.addEventListener('keydown', e => { if (e.key==='Enter'||e.key===' ') showPopup(pref, rank); });
+      } else {
+        cell.style.backgroundColor = 'transparent';
+        cell.setAttribute('role', 'gridcell');
+        cell.setAttribute('aria-hidden', 'true');
+      }
+      container.appendChild(cell);
+    }
+  }
+}
+
+function showPopup(pref, rank) {
+  document.getElementById('popup').classList.remove('hidden');
+  document.getElementById('popupHint').classList.add('hidden');
+  document.getElementById('popupName').textContent = pref.name + '県';
+  document.getElementById('popupPop').textContent = (pref.pop).toLocaleString() + '千人';
+  document.getElementById('popupArea').textContent = pref.area.toLocaleString() + ' km²';
+  document.getElementById('popupDensity').textContent = pref.density.toLocaleString() + ' 人/km²';
+  document.getElementById('popupRank').textContent = rank + '位 / 47都道府県';
+  document.getElementById('popupRegion').textContent = pref.region;
+}
+
+function buildRanking() {
+  const list = document.getElementById('rankingList');
+  ranked.slice(0, 10).forEach((p, i) => {
+    const li = document.createElement('li');
+    li.className = 'flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-700 px-1 rounded';
+    li.setAttribute('aria-label', `${i+1}位 ${p.name} ${p.density.toLocaleString()}人/km²`);
+    const col = densityColor(p.density);
+    li.innerHTML = `
+      <span class="text-gray-400 w-5 text-right text-xs">${i+1}</span>
+      <span class="flex-1">${escHtml(p.name)}</span>
+      <span class="font-mono text-xs" style="color:${col.bg === '#fff5f5' ? '#f87171' : col.bg}">${p.density.toLocaleString()}</span>
+    `;
+    li.addEventListener('click', () => showPopup(p, i+1));
+    list.appendChild(li);
+  });
+}
+
+buildMap();
+buildRanking();
+</script>
+</body>
+</html>
